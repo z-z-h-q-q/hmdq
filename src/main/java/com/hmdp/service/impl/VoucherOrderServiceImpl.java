@@ -8,7 +8,12 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
+import lombok.Synchronized;
+import org.jetbrains.annotations.NotNull;
+import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,8 +37,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private RedisIdWorker redisIdWorker;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
     @Override
-    @Transactional
     public Result seckillVoucher(Long voucherId) {
         // 1.查询优惠券
         SeckillVoucher voucher = seckillVoucherService.getById(voucherId);
@@ -48,7 +55,40 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (voucher.getStock() < 1) {
             return Result.fail("库存不足！");
         }
-        // 4.扣减库存
+        Long userId = UserHolder.getUser().getId();
+//        synchronized(userId.toString().intern()){
+//            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy(); // 获得当前对象的代理对象
+//            return proxy.createVoucherOrder(voucherId);
+//        }
+        // 创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        // 获取锁，时间与业务执行有关
+        boolean isLock = lock.tryLock(1200);
+        if (!isLock) {
+            // 返回错误或重试
+            return Result.fail("不允许重复下单");
+        }
+        try{
+            IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy(); // 获得当前对象的代理对象
+            return proxy.createVoucherOrder(voucherId);
+        }finally {
+            lock.unlock();
+        }
+
+    }
+
+    @Transactional
+    public Result createVoucherOrder(Long voucherId) {
+        // 4.一人一单（悲观锁）
+        // 4.1查询订单
+        Long userId = UserHolder.getUser().getId();
+        long count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
+        // 4.2判断
+        if (count > 0) {
+            return Result.fail("用户已经购买过一次！");
+        }
+
+        // 5.扣减库存（乐观锁，用于更新情况）
         boolean result = seckillVoucherService.update()
                 .setSql("stock = stock - 1")
                 .eq("voucher_id", voucherId).gt("stock", 0)
@@ -56,14 +96,15 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if(!result){
             return Result.fail("库存不足！");
         }
-        // 5.创建订单
+
+        // 6.创建订单
         VoucherOrder voucherOrder = new VoucherOrder();
         long orderId = redisIdWorker.nextId("order");
         voucherOrder.setId(orderId);
         voucherOrder.setVoucherId(voucherId);
-        voucherOrder.setUserId(UserHolder.getUser().getId());
+        voucherOrder.setUserId(userId);
         save(voucherOrder);
-        // 6.返回
+        // 7.返回
         return Result.ok(orderId);
     }
 }

@@ -1,14 +1,22 @@
 package com.hmdp.utils;
 
+import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.hmdp.entity.Shop;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+
+import static com.hmdp.utils.RedisConstants.*;
 
 @Component
 public class CacheClient {
@@ -47,5 +55,51 @@ public class CacheClient {
         }
         this.set(key, object, time, timeUnit);
         return object;
+    }
+
+    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+
+    public <R, ID> R queryWithLogicalExpire(String keyPrefix, ID id, Class<R> type, Function<ID, R> dbFallback, Long time, TimeUnit timeUnit){
+        String key = keyPrefix + id;
+        String json = stringRedisTemplate.opsForValue().get(key);
+        if(StrUtil.isBlank(json)){
+            // 热点数据，认为redis中不存在则表示没有
+            return null;
+        }
+        RedisData redisData = JSONUtil.toBean(json, RedisData.class);
+        LocalDateTime expireTime = redisData.getExpireTime();
+        R object = BeanUtil.toBean(redisData.getData(), type);
+        if(expireTime.isAfter(LocalDateTime.now())){
+            return object;
+        }
+        String lockKey = LOCK_SHOP_KEY + id;
+        boolean isLock = this.tryLock(lockKey);
+        if(isLock){
+            CACHE_REBUILD_EXECUTOR.submit(() -> {
+                try{
+                    // 查询数据库
+                    R object2 = dbFallback.apply(id);
+                    // 写入redis
+                    this.setWithLogicalExpire(key, object2, time, timeUnit);
+                }catch (Exception e){
+                    throw new RuntimeException(e);
+                }finally {
+                    this.unlock(lockKey);
+                }
+            });
+        }
+        return object;
+
+
+    }
+
+    private boolean tryLock(String key){
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", LOCK_SHOP_TTL, TimeUnit.MINUTES);
+        // 不要直接返回，拆箱过程中可能有空值问题
+        return BooleanUtil.isTrue(flag);
+    }
+
+    private void unlock(String key){
+        stringRedisTemplate.delete(key);
     }
 }

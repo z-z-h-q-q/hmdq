@@ -1,31 +1,24 @@
-# 代码使用说明(本项目来自b站[黑马程序员](https://space.bilibili.com/37974444)[redis教程](https://www.bilibili.com/video/BV1cr4y1671t)，仅供参考)
+# 代码使用说明
+## 改进部分
+### 1.登录模块，使用个人邮箱发送验证码
+使用QQ邮箱的SMTP服务，通过MailAccount配置SMTP邮件账户  
 
-项目代码包含2个分支：
-- master : 主分支，包含完整版代码，作为大家的编码参考使用
-- init : 初始化分支，实战篇的初始代码，建议大家以这个分支作为自己开发的基础代码
-- 前端资源在src/main/resources/nginx-1.18.0下
+使用FreeMarker模板引擎渲染模板，将变量code传递到模板中，生成邮件内容
 
-视频地址:
-- [黑马程序员Redis入门到实战教程，深度透析redis底层原理+redis分布式锁+企业解决方案+redis实战](https://www.bilibili.com/video/BV1cr4y1671t)
-- [https://www.bilibili.com/video/BV1cr4y1671t](https://www.bilibili.com/video/BV1cr4y1671t)
-  - P24起 实战篇
+### 2.秒杀模块，使用本地标记+RabbitMQ来优化秒杀异步下单，减轻数据库的压力
+- 参与秒杀活动的优惠券都在内存里用HashMap设置了一个标识，标识某个商品id商品是否卖完
+- 处理秒杀请求时，先访问内存标识，看秒杀的这个商品有没有卖完，减少对redis的不必要访问，如果内存标识中这个商品已经卖完，直接返回
+- 如果内存标识中这个商品没有卖完，基于lua脚本保证判断用户是否重复下单、预扣库存、下单并保存的原子性，同时采用RabbitMQ异步处理高并发情况下的请求
+- 消息队列的消费者负责减库存和生成秒杀订单，并把秒杀订单对象放入redis中。客户端抢单成功后通过轮询获得秒杀结果
 
-## 1.下载
-克隆完整项目
-```git
-git clone https://github.com/cs001020/hmdp.git
-```
-切换分支
-```git
-git checkout init
-```
+### 3.秒杀模块，使用令牌桶算法进行一定程度上的限流
+秒杀是个高并发的过程，短时间内后端访问量巨大，可能会压垮系统，而且只有少许人能秒杀成功，因此首先要做的应该是限流。
 
-## 2.常见问题
-部分同学直接使用了master分支项目来启动，控制台会一直报错:
-```
-NOGROUP No such key 'stream.orders' or consumer group 'g1' in XREADGROUP with GROUP option
-```
-这是因为我们完整版代码会尝试访问Redis，连接Redis的Stream。建议同学切换到init分支来开发，如果一定要运行master分支，请先在Redis运行一下命令：
-```text
-XGROUP CREATE stream.orders g1 $ MKSTREAM
-```
+RateLimiter是guava提供的基于令牌桶算法的限流实现类，通过调整生成token的速率来限制用户频繁访问秒杀页面，从而达到防止超大流量冲垮系统。
+
+实现：通过AOP定义注解
+
+- 定义一个注解 @ Limiting
+- 创建切面类， 使用 ConcurrentHashMap 为每个方法维护一个独立的 RateLimiter 实例，不同方法可以有不同的限流配置
+- 获取RateLimiter 实例，调用tryAcquire方法从RateLimiter 获取许可，如果该许可可以在无延迟下的情况下立即获取得到的话
+

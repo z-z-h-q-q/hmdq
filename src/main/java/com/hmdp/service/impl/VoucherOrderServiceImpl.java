@@ -177,4 +177,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 6.创建订单
         save(voucherOrder);
     }
+
+    @Override
+    public Result getSeckillOrder(Long voucherId) {
+        Long userId = UserHolder.getUser().getId();
+        String redisKey = String.format("seckill:order:%s:%s", userId, voucherId);
+        String result = stringRedisTemplate.opsForValue().get(redisKey);
+        if(result != null){
+            return Result.ok(JSONUtil.toBean(result, VoucherOrder.class));
+        }
+        VoucherOrder order = query().eq("user_id", userId).eq("voucher_id", voucherId).one();
+        if(order == null){
+            return Result.fail("下单失败！");
+        }
+        return Result.ok(order);
+    }
 }

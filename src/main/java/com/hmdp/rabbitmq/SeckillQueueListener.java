@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -60,5 +61,8 @@ public class SeckillQueueListener {
         }
         //直接保存订单
         voucherOrderService.save(order);
+
+        String redisKey = String.format("seckill:order:%s:%s", userId, voucherId);
+        stringRedisTemplate.opsForValue().set(redisKey, JSONUtil.toJsonStr(order), 10, TimeUnit.MINUTES);
     }
 }

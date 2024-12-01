@@ -15,7 +15,7 @@ import com.hmdp.service.IBlogService;
 import com.hmdp.service.IFollowService;
 import com.hmdp.service.IUserService;
 import com.hmdp.constant.RedisConstants;
-import com.hmdp.utils.SystemConstants;
+import com.hmdp.constant.SystemConstants;
 import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;

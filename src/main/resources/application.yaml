@@ -8,6 +8,13 @@ spring:
     url: jdbc:mysql://localhost:3306/hmdp?useSSL=false&serverTimezone=UTC
     username: root
     password: 123456
+  mail:
+    host: smtp.qq.com
+    username: 2274572823@qq.com
+    password: HSINEHIYCDRGRBYT
+    port: 587
+    protocol: smtp
+    default-encoding: UTF-8
   redis:
     host: 127.0.0.1
     port: 6379
@@ -18,6 +25,12 @@ spring:
         max-idle: 10
         min-idle: 1
         time-between-eviction-runs: 10s
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /  # 默认虚拟主机
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 mybatis-plus:

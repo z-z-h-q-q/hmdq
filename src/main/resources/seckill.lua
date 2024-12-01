@@ -22,6 +22,6 @@ redis.call('incrby', stockKey, -1)
 --- 4.保存订单
 redis.call('sadd', orderKey, ARGV[2])
 --- 5.发送消息到队列中 XADD 队列名称 * k1 v1 k2 v2 ...
-redis.call('xadd', 'stream.orders', '*', 'userId', ARGV[2], 'voucherId', ARGV[1], 'id', ARGV[3])
+--- redis.call('xadd', 'stream.orders', '*', 'userId', ARGV[2], 'voucherId', ARGV[1], 'id', ARGV[3])
 
 return 0
